@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  # Main agent service
+  agent-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent-blueprint
+    ports:
+      - "8000:8000"
+    environment:
+      # Anthropic
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      
+      # Stock APIs
+      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY}
+      - FMP_API_KEY=${FMP_API_KEY}
+      
+      # Vector DB
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_ENVIRONMENT=${PINECONE_ENVIRONMENT}
+      
+      # LangSmith (optional)
+      - LANGCHAIN_TRACING_V2=false
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      
+      # Configuration
+      - MAX_ITERATIONS=3
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./agent_blueprint.py:/app/agent_blueprint.py
+      - ./server.py:/app/server.py
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - agent-network
+
+  # Prometheus for monitoring (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+    networks:
+      - agent-network
+    depends_on:
+      - agent-api
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    restart: unless-stopped
+    networks:
+      - agent-network
+    depends_on:
+      - prometheus
+
+networks:
+  agent-network:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

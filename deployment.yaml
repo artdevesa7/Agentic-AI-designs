@@ -1,0 +1,148 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-blueprint
+  namespace: ai-agents
+  labels:
+    app: agent-blueprint
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: agent-blueprint
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: agent-blueprint
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      # Service account
+      serviceAccountName: agent-blueprint-sa
+      
+      containers:
+      - name: agent-api
+        image: your-registry/agent-blueprint:latest
+        imagePullPolicy: Always
+        
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: agent-config
+        
+        # Environment variables from Secrets
+        env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: agent-secrets
+              key: ANTHROPIC_API_KEY
+        - name: ALPHA_VANTAGE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: agent-secrets
+              key: ALPHA_VANTAGE_API_KEY
+        - name: FMP_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: agent-secrets
+              key: FMP_API_KEY
+        - name: PINECONE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: agent-secrets
+              key: PINECONE_API_KEY
+        - name: PINECONE_ENVIRONMENT
+          valueFrom:
+            secretKeyRef:
+              name: agent-secrets
+              key: PINECONE_ENVIRONMENT
+        - name: LANGCHAIN_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: agent-secrets
+              key: LANGCHAIN_API_KEY
+              optional: true
+        
+        # Resource limits
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        # Startup probe for slow initialization
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+        
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+      
+      # Termination grace period
+      terminationGracePeriodSeconds: 60
+      
+      # Node affinity (optional - spread across zones)
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - agent-blueprint
+              topologyKey: kubernetes.io/hostname
